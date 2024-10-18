@@ -1,0 +1,63 @@
+image: atlassian/default-image:4
+
+pipelines:
+  branches:
+    main:
+      - step:
+          name: Build Docker Images
+          services:
+            - docker
+          caches:
+            - docker-cache  
+          script:
+            - docker build -t admintadocker0428/admin_prod:pythonai-${BITBUCKET_COMMIT:0:7} ./services/
+            - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
+            - docker push admintadocker0428/admin_prod:pythonai-${BITBUCKET_COMMIT:0:7}
+
+      - step:
+          name: Deploy to Staging
+          deployment: staging
+          services:
+            - docker
+          script:
+            - pipe: atlassian/ssh-run:0.8.1
+              variables:
+                SSH_USER: "ec2-user"
+                SERVER: "$STAGING_SERVER_IP"
+                COMMAND: |
+                  ssh -o StrictHostKeyChecking=no -i EngageAI_PubKeypair1.pem ec2-user@$PROD_SERVER_IP << EOF
+                   cd /root/deployment
+                   PYTHONAI_TAG=${BITBUCKET_COMMIT:0:7} docker-compose -f deployment.yml up -d pythonai
+                  EOF
+    staging:
+      - step:
+          name: Build Docker Images
+          services:
+            - docker
+          caches:
+            - docker-cache  
+          script:
+            - docker build -t admintadocker0428/admin_staging:pythonai-${BITBUCKET_COMMIT:0:7} ./services/
+            - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
+            - docker push admintadocker0428/admin_staging:pythonai-${BITBUCKET_COMMIT:0:7}
+
+      - step:
+          name: Deploy to Staging
+          deployment: staging
+          services:
+            - docker
+          script:
+            - pipe: atlassian/ssh-run:0.8.1
+              variables:
+                SSH_USER: "root"
+                SERVER: "$STAGING_SERVER_IP"
+                COMMAND: |
+                  cd /root/deployment
+                  PYTHONAI_TAG=${BITBUCKET_COMMIT:0:7} docker-compose -f deployment.yml up -d pythonai
+
+definitions:
+  services:
+    docker:
+      memory: 2048
+  caches:
+    docker-cache: /var/lib/docker
